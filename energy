@@ -1,0 +1,216 @@
+import pandas as pd
+import numpy as np
+from openpyxl import workbook
+from openpyxl import load_workbook
+from openpyxl import styles
+import calendar
+import datetime
+#-----------------первая версия парсинг из csv
+#data1 = pd.read_csv('4607614.csv', sep = ';', header = None) #k=40 коэф. счетчика
+#data2 = pd.read_csv('4607664.csv', sep = ';', header = None)# k=80
+#data3 = pd.read_csv('4607733.csv', sep = ';', header = None)# k=200
+#data4 = pd.read_csv('4608054.csv', sep = ';', header = None)# k = 30
+#pd1 = data1[9]
+#pd2 = data2[9]
+#pd3 = data3[9]
+#pd4 = data4[9]
+
+#--------------------парсинг из excel
+pd1 = pd.read_excel('./6. Часовой профиль по присоединениям.xlsx', header=9, sheet_name = 'Отчет', usecols = [1])#k=30 коэф. счетчика 4608054
+pd2 = pd.read_excel('./6. Часовой профиль по присоединениям.xlsx', header=9, sheet_name = 'Отчет', usecols = [9]) # k=80               4607664
+pd3 = pd.read_excel('./6. Часовой профиль по присоединениям.xlsx', header=9, sheet_name = 'Отчет', usecols = [13]) # k=40              4607614
+pd4 = pd.read_excel('./6. Часовой профиль по присоединениям.xlsx', header=9, sheet_name = 'Отчет', usecols = [5]) # k = 200            4607733
+
+#------Кол-во часов в текущем месяце
+
+now = datetime.datetime.now()
+previous = now.month - 1  #previous = now.month - 1 в прошлом
+d = calendar.monthrange(now.year, previous)
+h = d[1]*24
+print (f'Количество часов: {h}')
+
+#--------------------------------
+
+wb = load_workbook('./105056.xlsx')
+sheet = wb['ФАКТ']
+writer = pd.ExcelWriter('test.xlsx', engine='openpyxl')
+
+#print(sheet['A1'].value)
+#position = sheet['B11']
+#-------Проверка строка или дробь
+def isfloat(value):
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+
+#----------заменяем "," на "." в списке
+def repl_fl(a):
+    if isfloat(a):
+       
+        return a
+    else:
+        v = a.replace(',','.')
+      
+        return v
+
+
+#-----------Константы---------
+
+
+#Траняформатор №1 k=40
+Pn1 = 250
+Pxx1 = 0.82
+Pkz1 = 3.7
+L1 = 0.05
+#Траняформатор №2 k=80
+Pn2 = 400
+Pxx2 = 1.05
+Pkz2 = 5.5
+L2 = 0.06
+#Траняформатор №3 k=200
+Pn3 = 630
+Pxx3 = 1.56
+Pkz3 = 7.6
+L3 = 0.1
+#Траняформатор №4 k=30
+Pn4 = 100
+Pxx4 = 0.36
+Pkz4 = 1.97
+L4 = 0.06
+
+U = 6                                    # Напряжение
+L = L1+L2+L3+L4                          # Длина линии
+R = 0.251                                # Удельное сопротивление
+cosf = 0.8                               # Коэф. мощности                             
+Kz = 0.29                                # Коэф. заполнения графика Кз
+
+#------------------------------------------------------
+
+
+#--------------------потери ээ в линиях Pl
+w1 = pd1.sum()
+w2 = pd2.sum()
+w3 = pd3.sum()
+w4 = pd4.sum()
+print(f'Расход ээ W1 : {w1}') 
+print(f'Расход ээ W2 : {w2}') 
+print(f'Расход ээ W3 : {w3}')
+print(f'Расход ээ W4 : {w4}') 
+
+W1 = 30*(float(repl_fl(w1)))
+W2 = 80*(float(repl_fl(w2)))
+W3 = 40*(float(repl_fl(w3)))
+W4 = 200*(float(repl_fl(w4)))
+W = round(W1+W2+W3+W4, 2)
+print(f'Расход ээ W1 : {W1}') 
+print(f'Расход ээ W2 : {W2}') 
+print(f'Расход ээ W3 : {W3}')
+print(f'Расход ээ W4 : {W4}')
+print(f'Расход ээ W за расчетный период: {W}')
+
+
+FKz = (1+2*Kz)/(3*Kz)                    #Квадрат коэф. формы графика
+Isr = W / ((3 ** 0.5) * U * h * cosf)    #Средний расчетный ток нагрузки
+Pl = 0.99 * h * FKz * (3 * (Isr ** 2) * L * R)/1000 #Потери в линии
+pl = round(Pl / h, 2) 
+print(f'потери ээ в линиях: {Pl}') 
+print(f'потери ээ в линиях в час: {pl}')
+#--------------------------потери в трансформаторе
+
+def pot_tr(a,b,c,d): #вычисляет суммарные потери 1го трансформатора a - ном. мощность, b - мощность ХХ, c - мощность КЗ, d - Расход W[]
+    Ps = d/(h*cosf) #Расчетная мощность нагрузки S
+    K2 = (1 + (2 * Kz)) / ( 3 * Kz) #Квадрат коэф. формы графика
+    pe1 =(0.99 * h * (((Ps ** 2) * c) / (a ** 2))*K2) # Потери КЗ в трансформаторе				
+    pe2 = b * h #Потери ХХ в трансформаторе				
+    dp = pe1+pe2 #Суммарные потери в трансформаторе				
+    return dp
+
+
+Pt = pot_tr(Pn1+Pn2+Pn3+Pn4,Pxx1+Pxx2+Pxx3+Pxx4,Pkz1+Pkz2+Pkz3+Pkz4,W)
+
+#P1 = pot_tr(Pn1,Pxx1,Pkz1,W1)
+#P2 = pot_tr(Pn2,Pxx2,Pkz2,W2)
+#P3 = pot_tr(Pn3,Pxx3,Pkz3,W3)
+#P4 = pot_tr(Pn4,Pxx4,Pkz4,W4)
+#Pt = P1 + P2 + P3 + P4
+print('потери ээ в трнсформаторах: ', Pt)
+
+pt = round(Pt / h, 2)                    #Потери в линии в час
+
+print('потери ээ в трнсформаторах в час: ', pt)
+#------------------------------------------
+
+ph = pl + pt #Общие потери ээ в час
+Psum =Pt + Pl
+print('потери ээ: ', Pt + Pl)
+print('потери ээ в час: ', ph)
+
+Wsum1 = W + Psum #Итого с потерями
+Wsum2=int(input('Введите суммарный расход с потерями из Акта показаний учета: '))
+dW = Wsum2 - Wsum1 
+#---------------------------------
+
+#счетчик csv строк
+count = 0
+cn = 0
+N = 0
+t = len(pd4)
+print(pd4.loc[383])
+for x in range(2, 18):
+   for y in range(11, 35):
+
+        if count <= t:
+            v1 = pd1.loc[count]
+            v2 = pd2.loc[count] 
+            v3 = pd3.loc[count] 
+            v4 = pd4.loc[count] 
+            p = round((float(v1)*30+float(v2)*80+float(v3)*40+float(v4)*200)+ph, 0)  #умножение на k
+            sheet.cell(y, x).number_format = styles.numbers.BUILTIN_FORMATS[0]
+            sheet.cell(y, x).value = p
+            count+=1
+            
+            if p != p:
+                cn+=1
+            else:
+                N = N+p
+        else:
+            sheet.cell(y, x).value = 0
+         
+for x in range(2, 17):
+   for y in range(41, 65):
+
+        if count <= t:
+            v1 = pd1.loc[count]
+            v2 = pd2.loc[count]
+            v3 = pd3.loc[count]
+            v4 = pd4.loc[count]
+            p = round((float(v1)*30+float(v2)*80+float(v3)*40+float(v4)*200)+ph, 0)  #умножение на k
+            sheet.cell(y, x).number_format = styles.numbers.BUILTIN_FORMATS[0]
+            sheet.cell(y, x).value = p
+            count+=1
+            N = N+p
+            if p != p:
+                cn+=1
+            else:
+                N = N+p
+        else:
+            sheet.cell(y, x).value = 0 
+dh = round(dW/cn, 0)
+for x in range(2, 18):
+   for y in range(11, 35):
+
+        if count <= t:
+            if sheet.cell(y, x).value != sheet.cell(y, x).value:
+             sheet.cell(y, x).value = dh
+        
+for x in range(2, 17):
+   for y in range(41, 65):
+
+        if count <= t:
+            if sheet.cell(y, x).value != sheet.cell(y, x).value:
+             sheet.cell(y, x).value = dh
+print(N)
+wb.save('ООО Предприятие.xlsx')
